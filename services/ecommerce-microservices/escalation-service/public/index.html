@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Towel Store — Live Order Tracking</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px 0; }
+  .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+  .grid { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+
+  .store-card {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 24px;
+    width: 260px;
+    text-align: center;
+  }
+  .towel-icon { font-size: 64px; margin-bottom: 4px; }
+  .store-card h2 { margin: 4px 0; font-size: 16px; }
+  .price { color: #4ade80; font-size: 20px; font-weight: bold; margin-bottom: 16px; }
+  button.order-btn {
+    background: #0f766e;
+    color: white;
+    border: none;
+    padding: 14px 20px;
+    border-radius: 8px;
+    font-size: 15px;
+    cursor: pointer;
+    width: 100%;
+  }
+  button.order-btn:hover { background: #115e59; }
+  button.order-btn:disabled { background: #475569; cursor: not-allowed; }
+  .order-msg { margin-top: 12px; font-size: 12px; color: #94a3b8; text-align: left; min-height: 16px; }
+
+  .card {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 16px;
+    min-width: 220px;
+  }
+  .card h3 { margin-top: 0; font-size: 14px; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.05em; }
+  .agent {
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+  }
+  .available { background: #14532d; border: 1px solid #16a34a; }
+  .busy { background: #7c2d12; border: 1px solid #ea580c; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .available .dot { background: #4ade80; }
+  .busy .dot { background: #fb923c; }
+
+  #log {
+    background: #020617;
+    border-radius: 12px;
+    padding: 14px;
+    height: 420px;
+    overflow-y: auto;
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    flex: 1;
+    min-width: 320px;
+  }
+  .log-line { padding: 5px 0; border-bottom: 1px solid #1e293b; display: flex; gap: 8px; align-items: baseline; }
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+  .assigned { background: #1d4ed8; }
+  .escalated { background: #dc2626; }
+  .ack { background: #16a34a; }
+  .completed { background: #0891b2; }
+  .waiting { background: #ca8a04; }
+  .time { color: #64748b; font-size: 11px; margin-left: auto; }
+</style>
+</head>
+<body>
+  <h1>🚚 Towel Store — Live Order Tracking</h1>
+  <div class="subtitle">Click order, then watch it get assigned to an agent in real time below. If not acknowledged within 2 minutes, it auto-escalates.</div>
+
+  <div class="grid">
+    <div class="store-card">
+      <div class="towel-icon">🧺</div>
+      <h2>Premium Bath Towel</h2>
+      <div class="price">₹499</div>
+      <button class="order-btn" id="orderBtn" onclick="orderTowel()">Order Now</button>
+      <div class="order-msg" id="orderMsg"></div>
+    </div>
+
+    <div class="card">
+      <h3>Agents</h3>
+      <div id="agents"></div>
+    </div>
+
+    <div id="log"></div>
+  </div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const host = window.location.hostname;
+  const CART_URL = `http://${host}:3001`;
+  const userId = 'user1';
+
+  const socket = io();
+  const agentsDiv = document.getElementById('agents');
+  const log = document.getElementById('log');
+  const orderBtn = document.getElementById('orderBtn');
+  const orderMsg = document.getElementById('orderMsg');
+
+  let agents = [];
+
+  function renderAgents() {
+    agentsDiv.innerHTML = agents.map(a =>
+      `<div class="agent ${a.status}"><span><span class="dot"></span>${a.name}</span><span>${a.status}</span></div>`
+    ).join('');
+  }
+
+  function addLog(tagClass, tagText, text) {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="tag ${tagClass}">${tagText}</span> <span>${text}</span> <span class="time">${new Date().toLocaleTimeString()}</span>`;
+    log.prepend(line);
+  }
+
+  socket.on('agents:snapshot', (data) => { agents = data; renderAgents(); });
+  socket.on('agent:status', ({ agentId, status }) => {
+    const a = agents.find(x => x.id === agentId);
+    if (a) { a.status = status; renderAgents(); }
+  });
+  socket.on('order:assigned', (d) => {
+    addLog('assigned', 'ASSIGNED', `Order ${d.orderId} → ${d.agentName} (escalation #${d.escalationCount})`);
+    const a = agents.find(x => x.id === d.agentId); if (a) { a.status = 'busy'; renderAgents(); }
+  });
+  socket.on('order:escalated', (d) => {
+    addLog('escalated', 'ESCALATED', `${d.fromAgentId} missed it → reassigned to ${d.toAgentId} (escalation #${d.escalationCount})`);
+  });
+  socket.on('order:acknowledged', (d) => {
+    addLog('ack', 'ACK', `Order ${d.orderId} acknowledged by ${d.agentId}`);
+  });
+  socket.on('order:completed', (d) => {
+    addLog('completed', 'DONE', `Order ${d.orderId} completed by ${d.agentId}`);
+  });
+  socket.on('order:no_agents_available', (d) => {
+    addLog('waiting', 'WAITING', `Order ${d.orderId}: no agents available, retrying...`);
+  });
+
+  async function orderTowel() {
+    orderBtn.disabled = true;
+    orderBtn.textContent = 'Placing order...';
+    orderMsg.textContent = 'Adding towel to cart...';
+
+    try {
+      const addResp = await fetch(`${CART_URL}/cart/${userId}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: 'tw01', name: 'Bath Towel', qty: 1, price: 499 })
+      });
+      if (!addResp.ok) throw new Error('add to cart failed: ' + addResp.status);
+
+      orderMsg.textContent = 'Checking out...';
+      const checkoutResp = await fetch(`${CART_URL}/cart/${userId}/checkout`, { method: 'POST' });
+      const order = await checkoutResp.json();
+
+      if (!checkoutResp.ok) {
+        orderMsg.textContent = `Order failed: ${order.error || checkoutResp.status}`;
+        orderBtn.disabled = false;
+        orderBtn.textContent = 'Try Again';
+        return;
+      }
+
+      orderMsg.textContent = `Order ${order.orderId} placed — watch the panel below →`;
+      orderBtn.textContent = 'Order Another Towel';
+      orderBtn.disabled = false;
+
+    } catch (err) {
+      orderMsg.textContent = `Error: ${err.message}`;
+      orderBtn.disabled = false;
+      orderBtn.textContent = 'Try Again';
+    }
+  }
+
+  renderAgents();
+</script>
+</body>
+</html>
