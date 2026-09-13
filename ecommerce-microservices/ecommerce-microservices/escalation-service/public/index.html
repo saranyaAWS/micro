@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Live Order Allocation Dashboard</title>
+<style>
+  body { font-family: Arial, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; padding:24px; }
+  h1 { font-size: 20px; }
+  .grid { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:#1e293b; border-radius:8px; padding:16px; min-width:220px; }
+  .agent { padding:8px; border-radius:6px; margin-bottom:6px; }
+  .available { background:#166534; }
+  .busy { background:#92400e; }
+  .offline { background:#374151; }
+  #log { background:#020617; border-radius:8px; padding:12px; height:400px; overflow-y:auto; font-family: monospace; font-size: 13px; flex:1; min-width:320px; }
+  .log-line { padding:2px 0; border-bottom:1px solid #1e293b; }
+  .tag { padding:2px 6px; border-radius:4px; margin-right:6px; font-size:11px; }
+  .assigned { background:#1d4ed8; }
+  .escalated { background:#dc2626; }
+  .ack { background:#16a34a; }
+  .completed { background:#0891b2; }
+</style>
+</head>
+<body>
+  <h1>🚚 Real-Time Order Allocation & Escalation Dashboard</h1>
+  <div class="grid">
+    <div class="card">
+      <h3>Agents</h3>
+      <div id="agents"></div>
+    </div>
+    <div id="log"></div>
+  </div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const agentsDiv = document.getElementById('agents');
+  const log = document.getElementById('log');
+
+  let agents = [];
+
+  function renderAgents() {
+    agentsDiv.innerHTML = agents.map(a =>
+      `<div class="agent ${a.status}">${a.name} — ${a.status}</div>`
+    ).join('');
+  }
+
+  function addLog(tagClass, tagText, text) {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="tag ${tagClass}">${tagText}</span> ${text} <span style="color:#64748b">(${new Date().toLocaleTimeString()})</span>`;
+    log.prepend(line);
+  }
+
+  socket.on('agents:snapshot', (data) => { agents = data; renderAgents(); });
+  socket.on('agent:status', ({ agentId, status }) => {
+    const a = agents.find(a => a.id === agentId);
+    if (a) { a.status = status; renderAgents(); }
+  });
+
+  socket.on('order:assigned', (d) => {
+    addLog('assigned', 'ASSIGNED', `Order ${d.orderId} → ${d.agentName} (escalations so far: ${d.escalationCount})`);
+    const a = agents.find(a => a.id === d.agentId); if (a) { a.status='busy'; renderAgents(); }
+  });
+  socket.on('order:escalated', (d) => {
+    addLog('escalated', 'ESCALATED', `Order ${d.orderId}: ${d.fromAgentId} missed it → reassigned to ${d.toAgentId} (escalation #${d.escalationCount})`);
+  });
+  socket.on('order:acknowledged', (d) => {
+    addLog('ack', 'ACK', `Order ${d.orderId} acknowledged by ${d.agentId}`);
+  });
+  socket.on('order:completed', (d) => {
+    addLog('completed', 'DONE', `Order ${d.orderId} completed by ${d.agentId}`);
+  });
+  socket.on('order:no_agents_available', (d) => {
+    addLog('escalated', 'WAITING', `Order ${d.orderId}: no agents available, retrying...`);
+  });
+</script>
+</body>
+</html>

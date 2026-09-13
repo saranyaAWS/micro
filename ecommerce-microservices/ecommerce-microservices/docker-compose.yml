@@ -1,0 +1,59 @@
+version: "3.8"
+
+services:
+  cart-service:
+    build: ./cart-service
+    container_name: cart-service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - ORDER_SERVICE_URL=http://order-service:3002
+    restart: unless-stopped
+
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - PAYMENT_SERVICE_URL=http://payment-service:3003
+      - ESCALATION_SERVICE_URL=http://escalation-service:3004
+    restart: unless-stopped
+    depends_on:
+      - payment-service
+      - escalation-service
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+    restart: unless-stopped
+
+  escalation-service:
+    build: ./escalation-service
+    container_name: escalation-service
+    ports:
+      - "3004:3004"
+    environment:
+      - PORT=3004
+      - ESCALATION_TIMEOUT_MS=120000
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:alpine
+    container_name: gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - cart-service
+      - order-service
+      - payment-service
+      - escalation-service
+    restart: unless-stopped
